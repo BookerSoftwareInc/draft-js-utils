@@ -1,7 +1,13 @@
 // @flow
 
 import replaceTextWithMeta from './lib/replaceTextWithMeta';
-import {CharacterMetadata, ContentBlock, ContentState, genKey} from 'draft-js';
+import {
+    CharacterMetadata,
+    ContentBlock,
+    ContentState,
+    Entity,
+    genKey
+} from 'draft-js';
 import {List, Map, OrderedSet, Repeat, Seq} from 'immutable';
 import {BLOCK_TYPE, ENTITY_TYPE, INLINE_STYLE} from 'draft-js-utils';
 import {NODE_TYPE_ELEMENT, NODE_TYPE_TEXT} from 'synthetic-dom';
@@ -10,8 +16,7 @@ import {
   SPECIAL_ELEMENTS,
   SELF_CLOSING_ELEMENTS,
 } from './lib/Constants';
-
-import type {Entity} from 'draft-js';
+import styleToCssString from './styleToCssString';
 import type {Set, IndexedSeq} from 'immutable';
 import type {
   Node as SyntheticNode,
@@ -47,8 +52,6 @@ type ParsedBlock = {
   data: ?BlockData;
 };
 
-export type ElementStyles = {[tagName: string]: Style};
-
 type PartialBlock = {
   type?: string;
   data?: BlockData;
@@ -78,11 +81,17 @@ export type CustomInlineFn = (
   }
 ) => ?(CustomStyle | CustomEntity);
 
+type ElementStyles = {[tagName: string]: Style};
+type CustomStyleMap = {[styleName: string]: { [key: string]: string }};
+type CustomCssMapToStyle = {[css: string]: string};
+
 type Options = {
   elementStyles?: ElementStyles;
   blockTypes?: {[key: string]: string};
   customBlockFn?: CustomBlockFn;
   customInlineFn?: CustomInlineFn;
+  customStyleMap?: CustomStyleMap;
+  customBlockFn?: (element: DOMElement) => ?{type?: string, data?: BlockData};
 };
 type DataMap<T> = {[key: string]: T};
 
@@ -164,6 +173,8 @@ class ContentGenerator {
   blockList: Array<ParsedBlock>;
   depth: number;
   options: Options;
+  elementStyles: ElementStyles;
+  customStyleMap: CustomStyleMap;
   // This will be passed to the customInlineFn to allow it
   // to return a Style() or Entity().
   inlineCreators = {
@@ -183,6 +194,8 @@ class ContentGenerator {
     // This is a linear list of blocks that will form the output; for example
     // [p, li, li, blockquote].
     this.blockList = [];
+    this.elementStyles = options.elementStyles || {};
+    this.customStyleMap = options.customStyleMap || {};
     this.depth = 0;
   }
 
@@ -342,6 +355,24 @@ class ContentGenerator {
     let block = this.blockStack.slice(-1)[0];
     let style = block.styleStack.slice(-1)[0];
     let entityKey = block.entityStack.slice(-1)[0];
+    style = addStyleFromTagName(style, tagName, this.elementStyles);
+    let styleAttribute = element.getAttribute('style');
+    if (styleAttribute) {
+      const customCssMapToStyle = {};
+      const normalizeStyle = str => str.replace(/ /g, '').replace(/;/g, '');
+
+      // Convert react styles to css string values
+      Object.keys(this.customStyleMap).forEach((key) => {
+        customCssMapToStyle[normalizeStyle(styleToCssString(this.customStyleMap[key]))] = key;
+      });
+
+      for (let styleValue of styleAttribute.split(';')) {
+        const styleAttr = normalizeStyle(styleValue);
+        if (styleAttr) {
+          style = addStyleFromStyleAttribute(style, styleAttr, customCssMapToStyle);
+        }
+      }
+    }
     let {customInlineFn} = this.options;
     let customInline = customInlineFn ? customInlineFn(element, this.inlineCreators) : null;
     if (customInline != null) {
@@ -563,6 +594,14 @@ function toStringMap(input: mixed) {
     }
   }
   return result;
+}
+
+function addStyleFromStyleAttribute(styleSet: StyleSet, styleAttributeValue: string, customCssMapToStyle: CustomCssMapToStyle): StyleSet {
+  // Allow custom css styles to be provided
+  if (Object.keys(customCssMapToStyle).indexOf(styleAttributeValue) >= 0) {
+    return styleSet.add(customCssMapToStyle[styleAttributeValue]);
+  }
+  return styleSet;
 }
 
 function isAllowedHref(input: ?string) {
