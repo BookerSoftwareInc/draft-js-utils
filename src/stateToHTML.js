@@ -31,6 +31,8 @@ type RenderConfig = {
 };
 
 type BlockRenderer = (block: ContentBlock) => ?string;
+type BlockTags = (blockType: string) => Array<string>;
+type BlockWrapperTag = (blockType: string) => ?string;
 type BlockRendererMap = {[blockType: string]: BlockRenderer};
 
 type StyleMap = {[styleName: string]: RenderConfig};
@@ -43,6 +45,8 @@ type Options = {
   inlineStyles?: StyleMap;
   inlineStyleFn?: InlineStyleFn;
   blockRenderers?: BlockRendererMap;
+  blockTags?: BlockTags;
+  blockWrapperTag?: BlockWrapperTag;
   blockStyleFn?: BlockStyleFn;
   entityStyleFn?: EntityStyleFn;
   defaultBlockTag?: ?string;
@@ -181,6 +185,8 @@ class MarkupGenerator {
   inlineStyles: StyleMap;
   inlineStyleFn: ?InlineStyleFn;
   styleOrder: Array<string>;
+  blockTags: BlockTags;
+  blockWrapperTag: BlockWrapperTag;
 
   constructor(contentState: ContentState, options: ?Options) {
     if (options == null) {
@@ -197,6 +203,9 @@ class MarkupGenerator {
     ]);
     this.inlineStyles = inlineStyles;
     this.inlineStyleFn = options.inlineStyleFn;
+    this.styleOrder = styleOrder;
+    this.blockTags = options.blockTags || getTags;
+    this.blockWrapperTag = options.blockWrapperTag || getWrapperTag;
     this.styleOrder = styleOrder;
   }
 
@@ -218,7 +227,7 @@ class MarkupGenerator {
     let {blockRenderers, defaultBlockTag} = this.options;
     let block = this.blocks[this.currentBlock];
     let blockType = block.getType();
-    let newWrapperTag = getWrapperTag(blockType);
+    let newWrapperTag = this.blockWrapperTag(blockType);
     if (this.wrapperTag !== newWrapperTag) {
       if (this.wrapperTag) {
         this.closeWrapperTag();
@@ -511,9 +520,6 @@ function encodeAttr(text: string): string {
     .join('&quot;');
 }
 
-export default function stateToHTML(
-  content: ContentState,
-  options: ?Options,
-): string {
+export default function stateToHTML(content: ContentState, options: ?Options): string {
   return new MarkupGenerator(content, options).generate();
 }
